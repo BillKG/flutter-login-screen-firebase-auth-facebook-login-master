@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -212,68 +213,64 @@ class _LoginScreen extends State<LoginScreen> {
                 ),
               ),
             ),
-            // Padding(
-            //   padding:
-            //   const EdgeInsets.only(right: 40.0, left: 40.0, bottom: 20),
-            //   child: ConstrainedBox(
-            //     constraints: const BoxConstraints(minWidth: double.infinity),
-            //     child: RaisedButton.icon(
-            //       label: Text(
-            //         'Google Login',
-            //         style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            //       ),
-            //       icon: Padding(
-            //         padding: const EdgeInsets.symmetric(vertical: 8.0),
-            //         child: Image.asset(
-            //           'assets/images/facebook_logo.png',
-            //           color: Colors.white,
-            //           height: 30,
-            //           width: 30,
-            //         ),
-            //       ),
-            //       color: Color(Constants.FACEBOOK_BUTTON_COLOR),
-            //       textColor: Colors.white,
-            //       splashColor: Color(Constants.FACEBOOK_BUTTON_COLOR),
-            //       onPressed: () async {
-            //         final facebookLogin = FacebookLogin();
-            //         final result = await facebookLogin.logIn(['email']);
-            //         switch (result.status) {
-            //           case FacebookLoginStatus.loggedIn:
-            //             print(result.accessToken.token);
-            //             showProgress(
-            //                 context, 'Logging in, please wait...', false);
-            //             await FirebaseAuth.instance
-            //                 .signInWithCredential(
-            //                 FacebookAuthProvider.getCredential(
-            //                     accessToken: result.accessToken.token))
-            //                 .then((AuthResult authResult) async {
-            //               print(authResult.user);
-            //               User user = await _fireStoreUtils
-            //                   .getCurrentUser(authResult.user.uid);
-            //               if (user == null) {
-            //                 _createUserFromFacebookLogin(
-            //                     result, authResult.user.uid);
-            //               } else {
-            //                 _syncUserDataWithFacebookData(result, user);
-            //               }
-            //             });
-            //             break;
-            //           case FacebookLoginStatus.cancelledByUser:
-            //             break;
-            //           case FacebookLoginStatus.error:
-            //             print(result.errorMessage);
-            //             showAlertDialog(
-            //                 context, 'Error', 'Couldn\'t login via facebook.');
-            //             break;
-            //         }
-            //       },
-            //       shape: RoundedRectangleBorder(
-            //           borderRadius: BorderRadius.circular(25.0),
-            //           side: BorderSide(
-            //               color: Color(Constants.FACEBOOK_BUTTON_COLOR))),
-            //     ),
-            //   ),
-            // ),
+            Padding(
+              padding:
+              const EdgeInsets.only(right: 40.0, left: 40.0, bottom: 20),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: double.infinity),
+                child: RaisedButton.icon(
+                  label: Text(
+                    'Google SignIn',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  icon: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: Image.asset(
+                      'assets/images/facebook_logo.png',
+                      color: Colors.white,
+                      height: 30,
+                      width: 30,
+                    ),
+                  ),
+                  color: Colors.red,
+                  textColor: Colors.white,
+                  splashColor: Colors.red,
+                  onPressed: () async {
+                    final GoogleSignIn _googleSignIn = new GoogleSignIn();
+                    final GoogleSignInAccount googleUser = await _googleSignIn.signIn().catchError((error) {
+                      print(error.toString());
+                      showAlertDialog(
+                          context, 'Error', 'Couldn\'t login via google.');
+                    });
+                    if (googleUser!=null) {
+                      showProgress(
+                          context, 'Logging in, please wait...', false);
+                      final GoogleSignInAuthentication googleAuth =await googleUser.authentication;
+                      final AuthCredential credential = GoogleAuthProvider.getCredential(
+                        accessToken: googleAuth.accessToken,
+                        idToken: googleAuth.idToken,
+                      );
+                      await FirebaseAuth.instance
+                          .signInWithCredential(credential)
+                          .then((authResult) async {
+                            User user = await _fireStoreUtils.getCurrentUser(authResult.user.uid);
+                            if (user == null) {
+                              _createUserFromGoogleSignIn(googleUser, authResult);
+                            } else{
+                              _syncUserDataWithGoogleData(googleUser, user);
+                            }
+                          });
+                    }
+                  },
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(25.0),
+                      side: BorderSide(
+                          color: Colors.red
+                      )
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -350,6 +347,40 @@ class _LoginScreen extends State<LoginScreen> {
     _passwordController.dispose();
     super.dispose();
   }
+
+  void _createUserFromGoogleSignIn( GoogleSignInAccount result,AuthResult authResult) async{
+    User user = User(
+        firstName: result.displayName,
+        lastName: result.displayName,
+        email: result.email,
+        profilePictureURL: result.photoUrl,
+        active: true,
+        userID: authResult.user.uid
+    );
+    await FireStoreUtils.firestore
+        .collection(Constants.USERS)
+        .document(authResult.user.uid)
+        .setData(user.toJson())
+        .then((onValue) {
+      MyAppState.currentUser = user;
+      hideProgress();
+      pushAndRemoveUntil(context, HomeScreen(user: user), false);
+    });
+  }
+
+  void _syncUserDataWithGoogleData(GoogleSignInAccount result, User user) async{
+    user.profilePictureURL = result.photoUrl;
+    user.firstName = result.displayName;
+    user.lastName = result.displayName;
+    user.email = result.email;
+    user.active = true;
+    await _fireStoreUtils.updateCurrentUser(user, context);
+    MyAppState.currentUser = user;
+    hideProgress();
+    pushAndRemoveUntil(context, HomeScreen(user: user), false);
+  }
+
+
 
   void _createUserFromFacebookLogin(FacebookLoginResult result,
       String userID) async {
